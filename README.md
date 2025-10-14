@@ -1,3 +1,6 @@
+# Astronomyproject based on Tessutils (see instructions below)
+
+
 # Tessutils
 Pick a TIC number and obtain a reduced light curve for all TESS sectors available along with diagnostic plots about the reduction.
 
