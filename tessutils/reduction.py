@@ -1,5 +1,5 @@
 # Built-in modules
-import signal, warnings, pickle, re
+import signal, warnings, pickle, re, platform, threading
 from time import sleep
 from types import SimpleNamespace
 from pathlib import Path
@@ -303,94 +303,118 @@ def query_TIC(target,
               tic_id=None,
               search_radius=600.*u.arcsec,
               **kwargs):
-        """
-        Retrieving information from the TESS input catalog. 
+    """
+    Retrieving information from the TESS input catalog. 
 
-        Source
-        ----------
-        Courtesy of Dr. Timothy Van Reeth
+    Source
+    ----------
+    Courtesy of Dr. Timothy Van Reeth
 
-        Notes
-        ----------
-        I (Stefano) modified the behaviour when `tic_id` is given.
+    Notes
+    ----------
+    I (Stefano) modified the behaviour when `tic_id` is given.
 
 
-        Parameters
-        ----------
-        target:
-            Target name
-        target_coord (optional):
-            Target coordinates (astropy Skycoord)
-        search_radius:
-            TIC entries around the target coordinaes wihtin this radius are considered.
-        **kwargs:
-            dict to be passed to astroquery.Catalogs.query_object or query_region.
-        """
+    Parameters
+    ----------
+    target:
+        Target name
+    target_coord (optional):
+        Target coordinates (astropy Skycoord)
+    search_radius:
+        TIC entries around the target coordinaes wihtin this radius are considered.
+    **kwargs:
+        dict to be passed to astroquery.Catalogs.query_object or query_region.
+    """
+
+    # Cross-platform warning after 30s: SIGALRM on Unix, threading.Timer elsewhere  modified by Michiel Six
+    def _warn_msg():
+        print("The TIC query is taking a long time... the database may be slow right now...")
+
+    use_unix_alarm = False
+    try:
+        use_unix_alarm = hasattr(signal, "SIGALRM") and platform.system().lower() != "windows"
+    except Exception:
+        use_unix_alarm = False
+
+    if use_unix_alarm:
+        def _tic_handler(signum, frame):
+            _warn_msg()
+        signal.signal(signal.SIGALRM, _tic_handler)
+        signal.alarm(30)
+        _warn = None
+    else:
+        _warn = threading.Timer(30, _warn_msg)
+        _warn.start()
+
+    deg_radius = float(search_radius / u.deg)
+    arc_radius = float(search_radius / u.arcsec)
+    
+    tic = None
+    tess_coord = None
+    tmag = None 
+    nb_coords = []
+    nb_tmags = []
+    tic_index = -1
+    
+    try:
+        # The TIC query should finish relatively fast, but has sometimes taken (a lot!) longer.
+        # This should be finished after 30 seconds, but it may take longer...
         
-        def _tic_handler(lc,signum):
-            '''Supporting function of `query_TIC`'''
-            print('the query of the TIC is taking a long time... Something may be wrong with the database right now...')
-
-        deg_radius = float(search_radius / u.deg)
-        arc_radius = float(search_radius / u.arcsec)
+        catalogTIC = Catalogs.query_region(target_coord, catalog="TIC", radius=deg_radius, **kwargs)
         
-        tic = None
-        tess_coord = None
-        tmag = None 
-        nb_coords = []
-        nb_tmags = []
-        tic_index = -1
-        
+    except Exception:
+        print(f"no entry could be retrieved from the TIC around {target}.")
+        catalogTIC = []
+    
+    finally:
+        # stop warning both variants
         try:
-            # The TIC query should finish relatively fast, but has sometimes taken (a lot!) longer.
-            # Setting a timer to warn the user if this is the case...
-            signal.signal(signal.SIGALRM,_tic_handler)
-            signal.alarm(30) # This should be finished after 30 seconds, but it may take longer...
-            
-            catalogTIC = Catalogs.query_region(target_coord, catalog="TIC", radius=deg_radius,**kwargs)
-            signal.alarm(0)
-            
-        except:
-            print(f"no entry could be retrieved from the TIC around {target}.")
-            catalogTIC = []
-        
-        if(len(catalogTIC) == 0):
-            print(f"no entry around {target} was found in the TIC within a {deg_radius:5.3f} degree radius.")
+            if use_unix_alarm:
+                signal.alarm(0)
+            else:
+                if _warn is not None:
+                    _warn.cancel()
+        except Exception:
+            pass
+    
+    if(len(catalogTIC) == 0):
+        print(f"no entry around {target} was found in the TIC within a {deg_radius:5.3f} degree radius.")
+    
+    else:
+        if not (tic_id is None):
+            # tic_index = np.argmin((np.array(catalogTIC['ID'],dtype=int) - int(tic_id))**2.) # Original line
+            tic_index = np.argwhere(catalogTIC['ID'] == str(tic_id)) # Modified by Stefano
+            if tic_index.size == 0:
+                return '-1', None, None, None, None
+
+            else:
+                tic_index = tic_index.item()
+        else:
+            tic_index = np.argmin(catalogTIC['dstArcSec'])
+    
+        if(tic_index < 0):
+            print(f"the attempt to retrieve target {target} from the TIC failed.")
         
         else:
-            if not (tic_id is None):
-                # tic_index = np.argmin((np.array(catalogTIC['ID'],dtype=int) - int(tic_id))**2.) # Original line
-                tic_index = np.argwhere(catalogTIC['ID'] == str(tic_id)) # Modified by Stefano
-                if tic_index.size == 0:
-                    return '-1', None, None, None, None
-
-                else:
-                    tic_index = tic_index.item()
-            else:
-                tic_index = np.argmin(catalogTIC['dstArcSec'])
-        
-            if(tic_index < 0):
-                print(f"the attempt to retrieve target {target} from the TIC failed.")
+            tic = int(catalogTIC[tic_index]['ID'])
+            ra = catalogTIC[tic_index]['ra']
+            dec = catalogTIC[tic_index]['dec']
+            tmag = catalogTIC[tic_index]['Tmag']
             
-            else:
-                tic = int(catalogTIC[tic_index]['ID'])
-                ra = catalogTIC[tic_index]['ra']
-                dec = catalogTIC[tic_index]['dec']
-                tmag = catalogTIC[tic_index]['Tmag']
-                
-                # Retrieve the coordinates
-                tess_coord = SkyCoord(ra, dec, unit = "deg")
-                
-                # Collecting the neighbours
-                if(len(catalogTIC) > 1):
-                    for itic, tic_entry in enumerate(catalogTIC):
-                        if(itic != tic_index):
-                            nb_coords.append(SkyCoord(tic_entry['ra'], tic_entry['dec'], unit = "deg"))
-                            nb_tmags.append(tic_entry['Tmag'])
-        
-        nb_tmags = np.array(nb_tmags)
-        
-        return tic, tess_coord, tmag, nb_coords, nb_tmags
+            # Retrieve the coordinates
+            tess_coord = SkyCoord(ra, dec, unit = "deg")
+            
+            # Collecting the neighbours
+            if(len(catalogTIC) > 1):
+                for itic, tic_entry in enumerate(catalogTIC):
+                    if(itic != tic_index):
+                        nb_coords.append(SkyCoord(tic_entry['ra'], tic_entry['dec'], unit = "deg"))
+                        nb_tmags.append(tic_entry['Tmag'])
+    
+    nb_tmags = np.array(nb_tmags)
+    
+    return tic, tess_coord, tmag, nb_coords, nb_tmags
 
 def check_aperture_mask(aperture,
                         aperture_mask_max_elongation=14,
