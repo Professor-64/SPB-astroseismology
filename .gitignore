@@ -1,5 +1,5 @@
 # Ignore everything
-*
+
 # but not these ones
 !.gitignore
 !README.md
@@ -26,3 +26,6 @@ tessutils/*
 tutorial/figures/*
 # but not these ones
 !tutorial/figures/boxplot.png
+
+#ignore
+TIC375038081/tpfs
