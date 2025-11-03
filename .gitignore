@@ -18,14 +18,18 @@ tutorial/*
 tessutils/*
 # but not these ones
 !tessutils/plots.py
+!tessutils/liveplots.py
 !tessutils/reduction.py
 !tessutils/utils.py
 !tessutils/__init__.py
+!tessutils/liveplots.py
 
 # Ignore everything
 tutorial/figures/*
 # but not these ones
 !tutorial/figures/boxplot.png
 
-#ignore
-TIC375038081/tpfs
+*.fits
+*.pickle
+
+!*.ipynb
