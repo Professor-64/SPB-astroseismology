@@ -31,5 +31,6 @@ tutorial/figures/*
 
 *.fits
 *.pickle
-
+*.csv
+*.pdf
 !*.ipynb
